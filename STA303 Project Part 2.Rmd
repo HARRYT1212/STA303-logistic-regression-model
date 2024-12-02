@@ -1,0 +1,609 @@
+---
+title: "Project P2"
+date: "2024-03-27"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+data = read.csv("data- cleaned.csv")
+```
+
+```{r}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+```
+
+```{r}
+summary(data)
+```
+
+```{r}
+data$gender = as.factor(data$gender)
+data$ever_married = as.factor(data$ever_married)
+data$work_type = as.factor(data$work_type)
+data$Residence_type = as.factor(data$Residence_type)
+data$smoking.status = as.factor(data$smoking.status)
+data = na.omit(data)
+data <- data[data$age >= 45, ]
+data$work_type <- droplevels(data$work_type)
+
+#a <- quantile(data$age,0.25)
+#b <- quantile(data$age,0.75)
+#IQR <- b-a
+#lb <- a-1.5*IQR
+#ub <- b-1.5*IQR
+#data <- subset(data, data$age >= lb & data$age <= ub)
+```
+
+```{r}
+summary(data)
+```
+
+
+Fit full model:
+```{r}
+modelfull <- glm(stroke~.-id-X, data = data, family = "binomial"(link = "logit"))
+summary(modelfull)
+```
+
+AIC
+```{r}
+## Stepwise elimination based on AIC ##
+sel.var.aic <- step(modelfull, trace = 0, k = 2, direction = "both") 
+select_var_aic<-attr(terms(sel.var.aic), "term.labels")   
+select_var_aic
+
+```
+
+BIC
+```{r}
+## Stepwise elimination based on AIC ##
+sel.var.bic <- step(modelfull, trace = 0, k = log(nrow(data)), direction = "both") 
+select_var_bic<-attr(terms(sel.var.bic), "term.labels")   
+select_var_bic
+
+```
+
+AIC stepwise selection model1:
+
+```{r}
+model1 <- glm(stroke ~ age + hypertension + heart_disease + ever_married + work_type + avg_glucose_level, 
+              data = data, family = "binomial"(link = "logit"))
+summary(model1)
+```
+
+```{r}
+e_hat <- resid(model1)
+qqnorm(e_hat)
+qqline(e_hat)
+```
+
+BIC stepwise selection model2:
+
+```{r}
+model2 <- glm(stroke ~ age + avg_glucose_level, data = data, family = "binomial"(link = "logit"))
+summary(model2)
+```
+
+```{r}
+model <- lm(stroke ~ .-X-id, data = data)
+conf_intervals <- confint(model)
+print(conf_intervals)
+
+```
+
+```{r}
+anova(modelfull, test = 'Chisq')
+
+```
+
+```{r}
+anova(sel.var.aic, test = 'Chisq')
+
+```
+
+p-value is good and significant.
+
+
+```{r}
+anova(sel.var.bic, test = 'Chisq')
+
+```
+
+LASSO
+```{r}
+library(glmnet)
+library(survival)
+library(MASS)
+library(influence.ME)
+x = as.matrix(data[,c(3:10,13)])
+y = data$stroke
+fit = glmnet(x, y, family = "binomial")
+plot(fit, xvar = "dev", label = TRUE)
+cv.out = cv.glmnet(x, y, family = "binomial", type.measure = "class", alpha = 0.5)
+plot(cv.out)
+best.lambda <- cv.out$lambda.1se
+best.lambda
+co <- coef(cv.out, s = "lambda.1se")
+co
+
+```
+LASSO not good
+
+```{r}
+vif(model1)
+```
+
+VIF is good except work_type, all around 1.
+
+```{r}
+install.packages("rms")
+library(rms)
+```
+
+```{r, echo=FALSE, message=FALSE, results='hide', fig.width=11, fig.height=5}
+par(mfrow = c(1, 2))
+set.seed(1008088070)
+lrm.final <- lrm(stroke~., data = data[,which(colnames(data) %in% c("age","hypertension", 
+                                                                    "heart_disease", "ever_married", "work_type",
+                                                                    "avg_glucose_level", "stroke"))], 
+                 x =TRUE, y = TRUE, model= T)
+cross.calib <- calibrate(lrm.final, method="crossvalidation", B=10) # model calibration
+plot(cross.calib, las=1, xlab = "Predicted Probability", cex.main = 0.8, cex.lab = 0.8, cex.axis = 0.7, cex.sub = 0.7)
+
+library(pROC)
+p <- predict(lrm.final1, type = "fitted")
+
+roc_logit <- roc(data$stroke ~ p)
+## The True Positive Rate ##
+TPR <- roc_logit$sensitivities
+## The False Positive Rate ##
+FPR <- 1 - roc_logit$specificities
+
+plot(cex.main = 0.8, cex.lab = 0.8, FPR, TPR, xlim = c(0,1), ylim = c(0,1), type = 'l', lty = 1, lwd = 2, col = 'red')
+abline(a = 0, b = 1, lty = 2, col = 'blue')
+text(0.7,0.4,label = paste("AUC = ", round(auc(roc_logit),2)))
+auc(roc_logit)
+```
+
+```{r, echo=FALSE, message=FALSE, results='hide', fig.width=11, fig.height=5}
+par(mfrow = c(1, 2))
+set.seed(1008088070)
+lrm.final <- lrm(stroke~., data = data[,which(colnames(data) %in% c("age",
+                                                                    "avg_glucose_level", "stroke"))], 
+                 x =TRUE, y = TRUE, model= T)
+cross.calib <- calibrate(lrm.final, method="crossvalidation", B=10) # model calibration
+plot(cross.calib, las=1, xlab = "Predicted Probability", cex.main = 0.8, cex.lab = 0.8, cex.axis = 0.7, cex.sub = 0.7)
+
+library(pROC)
+p <- predict(lrm.final, type = "fitted")
+
+roc_logit <- roc(data$stroke ~ p)
+## The True Positive Rate ##
+TPR <- roc_logit$sensitivities
+## The False Positive Rate ##
+FPR <- 1 - roc_logit$specificities
+
+plot(cex.main = 0.8, cex.lab = 0.8, FPR, TPR, xlim = c(0,1), ylim = c(0,1), type = 'l', lty = 1, lwd = 2, col = 'red')
+abline(a = 0, b = 1, lty = 2, col = 'blue')
+text(0.7,0.4,label = paste("AUC = ", round(auc(roc_logit),2)))
+auc(roc_logit)
+```
+
+
+```{r}
+## Fit the model with lrm from rms package ##
+set.seed(1008088070)
+lrm.final <- lrm(stroke ~ ., data = data[,which(colnames(data) %in% c(select_var_aic, "stroke"))], x =TRUE, y = TRUE, model= T)
+cross.calib <- calibrate(lrm.final, method="crossvalidation", B=10) # model calibration
+plot(cross.calib, las=1, xlab = "Predicted Probability")
+
+```
+
+Limitaton
+
+
+library(pROC)
+p <- predict(lrm.final, type = "fitted")
+
+roc_logit <- roc(data$stroke ~ p)
+## The True Positive Rate ##
+TPR <- roc_logit$sensitivities
+## The False Positive Rate ##
+FPR <- 1 - roc_logit$specificities
+
+plot(FPR, TPR, xlim = c(0,1), ylim = c(0,1), type = 'l', lty = 1, lwd = 2, col = 'red')
+abline(a = 0, b = 1, lty = 2, col = 'blue')
+text(0.7,0.4,label = paste("AUC = ", round(auc(roc_logit),2)))
+
+auc(roc_logit)
+
+
+
+AUC is good
+
+```{r}
+#residuals <- residuals(model1)
+#eta <- model1
+#plot(eta, residuals, xlab = "Eta (x*beta)", ylab = "Residuals", main = "QQ-Plot")
+#abline(h = 0, col = "red")  # Add a horizontal line at y = 0 for reference)
+```
+
+
+
+
+```{r}
+## Dfbetas ##
+par(mfrow = c(1, 2))
+
+log.mod.final <- glm(stroke ~ age + hypertension + heart_disease + ever_married + work_type + 
+                       avg_glucose_level, 
+                     family = binomial, data = data)
+df.final <- dfbetas(log.mod.final)
+head(df.final)
+
+par(family = 'serif')
+plot(data$age, df.final[,1], xlab='age of patients', 
+     ylab='dfbeta')
+lines(lowess(data$age, df.final[,1]), lwd=2, col='blue')
+abline(h=0, lty='dotted')
+abline(h=-2/sqrt(nrow(df.final)), lty='dotted')
+abline(h=2/sqrt(nrow(df.final)), lty='dotted')
+
+
+log.mod.final3 <- glm(stroke ~  age + hypertension + heart_disease + ever_married + work_type + 
+                       avg_glucose_level,
+                     family = binomial, data = data)
+df.final3 <- dfbetas(log.mod.final3)
+head(df.final3)
+
+par(family = 'serif')
+plot(data$avg_glucose_level, df.final3[,5], xlab='average glucose level of patients', 
+     ylab='dfbeta')
+lines(lowess(data$avg_glucose_level, df.final3[,5]), lwd=2, col='blue')
+abline(h=0, lty='dotted')
+abline(h=-2/sqrt(nrow(df.final3)), lty='dotted')
+abline(h=2/sqrt(nrow(df.final3)), lty='dotted')
+
+```
+
+```{r}
+par(mfrow = c(1, 2))
+log.mod.final1 <- glm(stroke ~ age + hypertension + heart_disease + ever_married + work_type + 
+                       avg_glucose_level,
+                      family = binomial, data = data)
+df.final1 <- dfbetas(log.mod.final1)
+
+# Assuming 'hypertension' is a factor/categorical variable
+par(family = 'serif')
+boxplot(df.final1[,2] ~ data$hypertension, xlab = 'Hypertension of patients', 
+        ylab = 'DFBETA', main = 'DFBETA check for Hypertension', col = 'lightblue')
+
+# Add horizontal lines for reference
+abline(h = 0, lty = 'dotted')
+abline(h = -2 / sqrt(nrow(df.final1)), lty = 'dotted')
+abline(h = 2 / sqrt(nrow(df.final1)), lty = 'dotted')
+
+
+log.mod.final2 <- glm(stroke ~ age + hypertension + heart_disease + ever_married + work_type + 
+                       avg_glucose_level,
+                      family = binomial, data = data)
+df.final2 <- dfbetas(log.mod.final2)
+
+# Assuming 'hypertension' is a factor/categorical variable
+par(family = 'serif')
+boxplot(df.final2[,3] ~ data$hypertension, xlab = 'Heart disease of patients', 
+        ylab = 'DFBETA', main = 'DFBETA check for Heart disease', col = 'lightblue')
+
+# Add horizontal lines for reference
+abline(h = 0, lty = 'dotted')
+abline(h = -2 / sqrt(nrow(df.final2)), lty = 'dotted')
+abline(h = 2 / sqrt(nrow(df.final2)), lty = 'dotted')
+```
+
+
+dfbeta for average glucose level of patients is good. not pattern and all around 0. 
+There may exist some influential points for average glucose level of patients data.
+
+
+New method: 
+```{r}
+D_cut <- 4/2577
+cook_dist <- cooks.distance(model1)
+plot(cook_dist)
+influential1 <- which(abs(cook_dist) > D_cut)
+```
+
+```{r}
+D_cut2 <- 4/2577
+cook_dist2 <- cooks.distance(model2)
+plot(cook_dist2)
+influential2 <- which(abs(cook_dist2) > D_cut2)
+```
+
+```{r}
+fits_cut <- 2*sqrt((4+1)/2577)
+dffits_i <- dffits(model1)
+plot(dffits_i)
+influential3 <- which(abs(dffits_i) > fits_cut)
+```
+
+```{r}
+fits_cut4 <- 2*sqrt((2+1)/2577)
+dffits_i4 <- dffits(model2)
+plot(dffits_i4)
+influential4 <- which(abs(dffits_i4) > fits_cut4)
+
+```
+
+
+
+```{r}
+cleaned_data1 <- data[-influential1, ]
+```
+
+
+
+```{r}
+modelfull1 <- glm(stroke~.-id-X, data = cleaned_data1, family = "binomial"(link = "logit"))
+summary(modelfull1)
+
+```
+
+```{r}
+cleaned_data2 <- data[-influential2, ]
+
+```
+
+```{r}
+modelfull2 <- glm(stroke~.-id-X, data = cleaned_data2, family = "binomial"(link = "logit"))
+summary(modelfull2)
+
+```
+
+```{r}
+
+D_cut <- 4/2577
+cook_dist <- cooks.distance(model3)
+plot(cook_dist)
+#influential1 <- which(abs(cook_dist) > D_cut)
+```
+
+
+```{r}
+## Stepwise elimination based on AIC ##
+sel.var.aic1 <- step(modelfull1, trace = 0, k = 2, direction = "both") 
+select_var_aic1<-attr(terms(sel.var.aic1), "term.labels")   
+select_var_aic1
+
+```
+
+
+
+```{r}
+model3 <- glm(stroke ~ gender + age + hypertension + heart_disease + work_type + smoking.status, 
+              data = cleaned_data1, family = "binomial"(link = "logit"))
+summary(model3)
+
+```
+
+Not good enough, the standard error is large and the variables are not siginicant. 
+So still use the original AIC model.
+
+Final model: 
+```{r}
+model4 <- glm(stroke ~ age + hypertension + heart_disease + avg_glucose_level, 
+              data = data, family = "binomial"(link = "logit"))
+summary(model4)
+
+```
+
+```{r, echo=FALSE, message=FALSE, results='hide', fig.width=11, fig.height=5}
+par(mfrow = c(1, 2))
+set.seed(1008088070)
+lrm.final <- lrm(stroke~., data = data[,which(colnames(data) %in% c("age","hypertension", 
+                                                                    "heart_disease",
+                                                                    "avg_glucose_level", "stroke"))], 
+                 x =TRUE, y = TRUE, model= T)
+cross.calib <- calibrate(lrm.final, method="crossvalidation", B=10) # model calibration
+plot(cross.calib, las=1, xlab = "Predicted Probability", cex.main = 0.8, cex.lab = 0.8, cex.axis = 0.7, cex.sub = 0.7)
+
+library(pROC)
+p <- predict(lrm.final, type = "fitted")
+
+roc_logit <- roc(data$stroke ~ p)
+## The True Positive Rate ##
+TPR <- roc_logit$sensitivities
+## The False Positive Rate ##
+FPR <- 1 - roc_logit$specificities
+
+plot(cex.main = 0.8, cex.lab = 0.8, FPR, TPR, xlim = c(0,1), ylim = c(0,1), type = 'l', lty = 1, lwd = 2, col = 'red')
+abline(a = 0, b = 1, lty = 2, col = 'blue')
+text(0.7,0.4,label = paste("AUC = ", round(auc(roc_logit),2)))
+auc(roc_logit)
+
+```
+
+
+
+
+
+```{r}
+sel.var.bic1 <- step(modelfull2, trace = 0, k = log(nrow(data)), direction = "both") 
+select_var_bic1<-attr(terms(sel.var.bic1), "term.labels")   
+select_var_bic1
+```
+not applicable, so we need to choose the original model.
+
+
+# EDA
+```{r}
+hypercounts <- data %>%
+  count(hypertension) %>%
+  mutate(Hypertension = ifelse(hypertension == 0, "No", "Yes"))
+
+custom_colors <- c("No" = "red",
+                   "Yes" = "blue")
+ggplot(hypercounts, aes(x = Hypertension, y = n, fill = Hypertension)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = n), vjust = -0.5) +
+  labs(title = "Hypertension of Patients", x = "Hypertension", y = "Count") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none") +
+  scale_fill_manual(values = custom_colors)
+```
+
+
+```{r}
+heartcounts <- data %>%
+  count(heart_disease) %>%
+  mutate(Heart_disease = ifelse(heart_disease == 0, "No", "Yes"))
+
+custom_colors <- c("No" = "red",
+                   "Yes" = "blue")
+ggplot(heartcounts, aes(x = Heart_disease, y = n, fill = Heart_disease)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = n), vjust = -0.5) +
+  labs(title = "Heart disease of Patients", x = "Heart disease", y = "Count") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none") +
+  scale_fill_manual(values = custom_colors)
+
+```
+
+
+```{r}
+strokecount <- data %>%
+  count(stroke) %>%
+  mutate(Stroke = ifelse(stroke == 0, "No", "Yes"))
+
+custom_colors <- c("No" = "red",
+                   "Yes" = "blue")
+ggplot(strokecount, aes(x = Stroke, y = n, fill = Stroke)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = n), vjust = -0.5) +
+  labs(title = "Stroke of Patients", x = "Stroke", y = "Count") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none") +
+  scale_fill_manual(values = custom_colors)
+
+```
+
+```{r}
+boxplot(data$age,main="Boxplot of Patient Age",ylab="Age",las=1)
+```
+
+```{r}
+boxplot(data$avg_glucose_level, main="Boxplot of average glucose level", ylab="average glucose", las=1)
+```
+
+```{r}
+boxplot(data$bmi, main="Boxplot of BMI level", ylab="BMI", las=1)
+```
+
+```{r}
+data$stroke_status <- factor(data$stroke, levels = c(0, 1), labels = c("No Stroke", "Stroke"))
+
+boxplot(data$avg_glucose_level[data$stroke_status == "No Stroke"], 
+        data$avg_glucose_level[data$stroke_status == "Stroke"], 
+        main = "Boxplot of average glucose level by Stroke Status", 
+        ylab = "average glucose level", 
+        names = c("No Stroke", "Stroke"),
+        las = 1)
+```
+
+```{r}
+data$stroke_status <- factor(data$stroke, levels = c(0, 1), labels = c("No Stroke", "Stroke"))
+
+boxplot(data$age[data$stroke_status == "No Stroke"], 
+        data$age[data$stroke_status == "Stroke"], 
+        main = "Boxplot of age  by Stroke Status", 
+        ylab = "age", 
+        names = c("No Stroke", "Stroke"),
+        las = 1)
+```
+
+
+
+```{r}
+data$stroke_status <- factor(data$stroke, levels = c(0, 1), labels = c("No Stroke", "Stroke"))
+
+boxplot(data$bmi[data$stroke_status == "No Stroke"], 
+        data$bmi[data$stroke_status == "Stroke"], 
+        main = "Boxplot of BMI level by Stroke Status", 
+        ylab = "BMI", 
+        names = c("No Stroke", "Stroke"),
+        las = 1)
+```
+
+```{r}
+worktypecount <- data %>%
+  count(work_type) %>%
+  mutate(Work_type = work_type, Frequency = n)
+
+ggplot(worktypecount, aes(x = Work_type, y = Frequency, fill = Work_type)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = Frequency), vjust = 0) +
+  labs(title = "Work type of Patients", x = "Work type", y = "Count") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")
+
+```
+
+```{r}
+restypecount <- data %>%
+  count(Residence_type) %>%
+  mutate(Residence_Type = Residence_type, Frequency = n)
+
+ggplot(restypecount, aes(x = Residence_Type, y = Frequency, fill = Residence_Type)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = Frequency), vjust = 0) +
+  labs(title = "Residence type of Patients", x = "Residence type", y = "Count") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")
+
+```
+
+```{r}
+gendertypecount <- data %>%
+  count(gender) %>%
+  mutate(gender = gender, Frequency = n)
+
+ggplot(gendertypecount, aes(x = gender, y = Frequency, fill = gender)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = Frequency), vjust = 0) +
+  labs(title = "Gender of Patients", x = "Gender", y = "Count") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")
+
+```
+
+```{r}
+marriedcount <- data %>%
+  count(ever_married) %>%
+  mutate(ever_married = ever_married, Frequency = n)
+
+ggplot(marriedcount, aes(x = ever_married, y = Frequency, fill = ever_married)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = Frequency), vjust = 0) +
+  labs(title = "Marital status of Patients", x = "Marital status", y = "Count") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")
+
+```
+
+
+
+
+
+
+
+
+
+
+
